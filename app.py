@@ -2,12 +2,18 @@ import gradio as gr
 from PIL import Image, ImageDraw
 import numpy as np
 import json
+import colorsys
 from sklearn.cluster import KMeans
 from datetime import datetime
 
-def extract_colors(image, num_colors):
+def extract_colors(image, num_colors, sample_size=100000):
     image = image.convert("RGB")
     img_data = np.array(image).reshape((-1, 3))
+
+    if len(img_data) > sample_size:
+        indices = np.random.choice(len(img_data), sample_size, replace=False)
+        img_data = img_data[indices]
+
     kmeans = KMeans(n_clusters=num_colors, random_state=42, n_init='auto')
     kmeans.fit(img_data)
     return kmeans.cluster_centers_.astype(int)
@@ -15,19 +21,27 @@ def extract_colors(image, num_colors):
 def rgb_to_ipcolor(r, g, b):
     return int(f"0xFF{int(r):02X}{int(g):02X}{int(b):02X}", 16) - int("0x100000000", 16)
 
+def sort_colors_by_hsv(colors):
+    def rgb_to_hsv(rgb):
+        r, g, b = [v / 255.0 for v in rgb]
+        return colorsys.rgb_to_hsv(r, g, b)  # H, S, V
+
+    # Trie par Hue → Saturation → Value
+    return sorted(colors, key=lambda rgb: rgb_to_hsv(rgb))
+
 def generate_palette(image, name, num_colors):
-    # Nom par défaut si vide
     if not name.strip():
         name = datetime.now().strftime("Palette_%Y%m%d_%H%M%S")
 
     colors = extract_colors(image, num_colors)
+    colors = sort_colors_by_hsv(colors)
     values = [rgb_to_ipcolor(*c) for c in colors]
     data = {"colors": values, "name": name}
     filename = f"{name}.clrs"
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
 
-    # Aperçu : grille avec max 15 colonnes
+    # Aperçu : grille avec 15 colonnes
     cols = 15
     rows = (num_colors + cols - 1) // cols
     swatch_size = 60
@@ -51,11 +65,11 @@ demo = gr.Interface(
     outputs=[
         gr.Text(label="Message"),
         gr.File(label="Fichier .clrs"),
-        gr.Image(label="Aperçu de la palette extraite")
+        gr.Image(label="Aperçu de la palette triée (HSV)")
     ],
     title="Palette Infinite Painter",
-    description="Génère un fichier .clrs depuis une image (jusqu’à 150 couleurs). Les images très grandes sont réduites pour éviter les lenteurs."
+    description="Génère un fichier .clrs depuis une image, trié par teinte, saturation et luminosité (HSV)."
 )
 
 if __name__ == "__main__":
-    demo.launch(prevent_thread_lock=True)
+    demo.launch()
